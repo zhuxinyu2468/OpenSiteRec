@@ -25,7 +25,6 @@ def split(city='NYC', threshold=20):
             cate22id[cate_2] = len(cate22id)
         if cate_3 not in cate32id.keys():
             cate32id[cate_3] = len(cate32id)
-
     brand2id = pd.DataFrame({'Brand': list(brand2id.keys()), 'Brand_ID': list(brand2id.values())})
     cate12id = pd.DataFrame({'cate_1': list(cate12id.keys()), 'Cate1_ID': list(cate12id.values())})
     cate22id = pd.DataFrame({'cate_2': list(cate22id.keys()), 'Cate2_ID': list(cate22id.values())})
@@ -53,6 +52,8 @@ def split(city='NYC', threshold=20):
         test_data.append(x_test)
 
     train_data, test_data = pd.concat(train_data, axis=0), pd.concat(test_data, axis=0)
+    print(train_data.shape,"train_data.shape")
+    print(test_data.shape,"test_data.shape")
     train_data.to_pickle('../' + city + '/split/' + 'train.pkl')
     test_data.to_pickle('../' + city + '/split/' + 'test.pkl')
 
