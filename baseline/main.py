@@ -6,7 +6,7 @@ import time
 from data_utils import OpenSiteRec, split
 from eval_utils import PrecisionRecall_atK, NDCG_atK, get_label
 from model import VanillaMF, NeuMF, RankNet, BasicCTRModel, WideDeep, DeepFM, xDeepFM, NGCF, LightGCN
-
+import json
 
 MODEL = {'VanillaMF': VanillaMF, 'NeuMF': NeuMF, 'RankNet': RankNet,
          'DNN': BasicCTRModel, 'WideDeep': WideDeep, 'DeepFM': DeepFM, 'xDeepFM': xDeepFM,
@@ -18,10 +18,10 @@ def parse_args():
         'lr': 0.001,
         'dropout': 0.3,
         'cuda': -1,
-        'epochs': 300,
+        'epochs': 10,
         'weight_decay': 1e-4,
         'seed': 42,
-        'model': 'LightGCN',
+        'model': 'VanillaMF',
         'dim': 100,
         'city': 'Tokyo',
         'threshold': 5,
@@ -138,6 +138,8 @@ def test():
     testDict = dataset.testDict
     all_pos = dataset.allPos
     rec, ndcg = 0., 0.
+    all_pre=[]
+    all_true=[]
     with torch.no_grad():
         users = list(testDict.keys())
         items = [testDict[u] for u in users]
@@ -166,15 +168,44 @@ def test():
             #     exclude_items.extend(its)
             # ratings[exclude_index, exclude_items] = -(1 << 10)
             _, ratings_K = torch.topk(ratings, k=args.topk[-1])
+            print("ratings_K",ratings_K)
+            all_pre.append(ratings_K)
+            all_true.append(batch_items)
+            print("test data",batch_items)
             ratings_K = ratings_K.cpu().numpy()
-
+        
             r = get_label(batch_items, ratings_K)
+
+            print("r",r)
             for k in args.topk:
                 _, batch_rec = PrecisionRecall_atK(batch_items, r, k)
                 batch_ndcg = NDCG_atK(batch_items, r, k)
                 rec += batch_rec * len(batch_users)
                 ndcg += batch_ndcg * len(batch_users)
+        
+        numpy_pre =all_pre#.numpy()
+        numpy_true =all_true#.numpy()
+        df = pd.DataFrame({'pre': all_pre,'true':all_true})
+        df.to_csv('result.csv')
+        # pd.Dataframe(numpy_pre).to_csv('pre.csv',numpy_pre)
+        # Convert the NumPy array to a Python list (if necessary)
+        # python_list = numpy_data.tolist()
 
+        # Your data to be converted to JSON
+        # data = {
+        #     "numpy_pre": numpy_pre,
+        #    "numpy_true": numpy_true
+        # }
+        # json_all_data= json.dumps(data, indent=2)
+        # json_all_data_path = "json_all_data.json"  
+        # json_all_pre= json.dumps(all_pre, indent=2)  # indent is optional, it makes the JSON file more readable
+        # json_all_true= json.dumps(all_true, indent=2) 
+        # json_all_pre_path = "json_all_pre.json"  # Change the path accordingly
+        # json_all_true_path = "json_all_true.json"  # Change the path accordingly
+
+        # with open(json_all_data_path, "w") as json_file:
+        #      json_file.write(json_all_data_path)
+ 
         rec /= len(users)
         ndcg /= len(users)
         if best_rec < rec:
