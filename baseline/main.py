@@ -7,6 +7,7 @@ from data_utils import OpenSiteRec, split
 from eval_utils import PrecisionRecall_atK, NDCG_atK, get_label
 from model import VanillaMF, NeuMF, RankNet, BasicCTRModel, WideDeep, DeepFM, xDeepFM, NGCF, LightGCN
 import json
+from torch import nn
 
 MODEL = {'VanillaMF': VanillaMF, 'NeuMF': NeuMF, 'RankNet': RankNet,
          'DNN': BasicCTRModel, 'WideDeep': WideDeep, 'DeepFM': DeepFM, 'xDeepFM': xDeepFM,
@@ -17,13 +18,13 @@ def parse_args():
     config_args = {
         'lr': 0.001,
         'dropout': 0.3,
-        'cuda': -1,
+        'cuda': 0,
         'epochs': 10,
         'weight_decay': 1e-4,
         'seed': 42,
         'model': 'VanillaMF',
         'dim': 100,
-        'city': 'Tokyo',
+        'city': 'foursquare_nyc',
         'threshold': 5,
         'topk': [20],
         'patience': 5,
@@ -51,11 +52,20 @@ dataset = OpenSiteRec(args)
 print(dataset.testDataSize)
 args.user_num, args.item_num, args.cate_num = dataset.n_user, dataset.m_item, dataset.k_cate
 args.Graph = dataset.Graph
+
+emb_path = f'{args.city}/{args.city}_emb.pth'
+new_embeddings = torch.load(emb_path).to(args.device)
+transform_layer = nn.Linear(new_embeddings.size(1), args.dim, bias=False).to(args.device)
+poi_embeddings = transform_layer(new_embeddings)
+print('new emb size: ', poi_embeddings.shape)
+
 model = MODEL[args.model](args)
 print(str(model))
+
+print('old emb: ', model.item_embedding.weight.shape)
 if args.cuda is not None and int(args.cuda) >= 0:
     model = model.to(args.device)
-
+model.item_embedding.weight.data = poi_embeddings[:args.item_num]
 optimizer = torch.optim.Adam(params=model.parameters(), lr=args.lr)
 tot_params = sum([np.prod(p.size()) for p in model.parameters()])
 print(f'Total number of parameters: {tot_params}')
@@ -117,8 +127,9 @@ def train_CTR():
             else torch.arange(i * args.batch_size, dataset.n_user)
         instances = {'Brand_ID': torch.LongTensor(dataset.U[indices]).to(args.device),
                      'Cate1_ID': torch.LongTensor(dataset.bF[indices][:, 0]).to(args.device),
-                     'Cate2_ID': torch.LongTensor(dataset.bF[indices][:, 1]).to(args.device),
-                     'Cate3_ID': torch.LongTensor(dataset.bF[indices][:, 2]).to(args.device)}
+                    #  'Cate2_ID': torch.LongTensor(dataset.bF[indices][:, 1]).to(args.device),
+                    #  'Cate3_ID': torch.LongTensor(dataset.bF[indices][:, 2]).to(args.device)
+                     }
         labels = torch.FloatTensor(dataset.bI[indices]).to(args.device)
 
         ratings = model(instances)
@@ -140,6 +151,7 @@ def test():
     rec, ndcg = 0., 0.
     all_pre=[]
     all_true=[]
+    recommendation_pairs = []
     with torch.no_grad():
         users = list(testDict.keys())
         items = [testDict[u] for u in users]
@@ -153,8 +165,9 @@ def test():
             if args.model in ['DNN', 'WideDeep', 'DeepFM', 'xDeepFM']:
                 instances = {'Brand_ID': torch.LongTensor(dataset.U[batch_users]).to(args.device),
                          'Cate1_ID': torch.LongTensor(dataset.F[batch_users][:, 0]).to(args.device),
-                         'Cate2_ID': torch.LongTensor(dataset.F[batch_users][:, 1]).to(args.device),
-                         'Cate3_ID': torch.LongTensor(dataset.F[batch_users][:, 2]).to(args.device)}
+                        #  'Cate2_ID': torch.LongTensor(dataset.F[batch_users][:, 1]).to(args.device),
+                        #  'Cate3_ID': torch.LongTensor(dataset.F[batch_users][:, 2]).to(args.device)
+                         }
             else:
                 instances = torch.LongTensor(batch_users).to(args.device)
 
@@ -183,10 +196,18 @@ def test():
                 rec += batch_rec * len(batch_users)
                 ndcg += batch_ndcg * len(batch_users)
         
+        all_pre_list = [ratings.cpu().numpy().tolist() for ratings in all_pre]
+        recommendation_pairs.append(
+            {"bactch_id": i, "test_set": list(all_true), "recommendations": all_pre_list})
+        
+        # save_result_path = 'recommendations.json'
+        # with open(save_result_path, 'w') as f:
+        #     json.dump(recommendation_pairs, f, indent=2)
+        
         numpy_pre =all_pre#.numpy()
         numpy_true =all_true#.numpy()
-        df = pd.DataFrame({'pre': all_pre,'true':all_true})
-        df.to_csv('result.csv')
+        df = pd.DataFrame({'pre': all_pre_list,'true':all_true})
+        df.to_csv(f'result_{args.city}.csv',index=False)
         # pd.Dataframe(numpy_pre).to_csv('pre.csv',numpy_pre)
         # Convert the NumPy array to a Python list (if necessary)
         # python_list = numpy_data.tolist()

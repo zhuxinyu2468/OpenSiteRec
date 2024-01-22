@@ -109,11 +109,12 @@ class BasicCTRModel(nn.Module):
         self.device = args.device
         self.batch_size = args.batch_size
         self.dim = args.dim
-        self.feature_name = ['Brand_ID', 'Cate1_ID', 'Cate2_ID', 'Cate3_ID', 'Region_ID']
+        self.feature_name = ['Brand_ID', 'Cate1_ID', 'Region_ID']
+        # self.feature_name = ['Brand_ID', 'Cate1_ID', 'Cate2_ID', 'Cate3_ID', 'Region_ID']
         self.feature_num = {'Brand_ID': args.user_num,
                             'Cate1_ID': args.cate_num[0],
-                            'Cate2_ID': args.cate_num[1],
-                            'Cate3_ID': args.cate_num[2],
+                            # 'Cate2_ID': args.cate_num[1],
+                            # 'Cate3_ID': args.cate_num[2],
                             'Region_ID': args.item_num}
         self.feat_dim = len(self.feature_name) * self.dim
         self.field_dim = len(self.feature_name)
