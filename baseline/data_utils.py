@@ -183,13 +183,83 @@ import os
 import pandas as pd
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from scipy.sparse import csr_matrix
 import scipy.sparse as sp
 from sklearn.model_selection import train_test_split
 
 
-def split(city='NYC', threshold=20):
+class MyModel(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(MyModel, self).__init__()
+        self.linear = nn.Linear(input_size, hidden_size)
+        self.layer_norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, x):
+        x = self.linear(x)
+        x = self.layer_norm(x)
+        return x
+
+
+def map_emb_to_region(node_embedding, df):
+    # print(node_embedding.shape)
+    # new_embeddings = torch.load(emb_path).to('cuda')
+    # print(df.head)
+
+    df_poi_region_map = df[['geo_id', 'Region_ID']]
+    # print(df_poi_region_map.head)
+
+    df_poi_region_map.sort_values('Region_ID')
+    df_poi_region_map_group = df_poi_region_map.groupby('Region_ID')[
+        'geo_id'].apply(list)
+    region_embeddings = {}
+    # print(df_poi_region_map_group[2])
+    for region_id, poi_ids in df_poi_region_map_group.items():
+        # print(region_id, poi_ids)
+        # 将poi_ids转换为PyTorch张量
+        poi_indices = torch.tensor(poi_ids, dtype=torch.long).to('cuda')
+
+        # 使用torch.index_select来获取所有poi的嵌入向量
+        embeddings = torch.index_select(
+            node_embedding, 0, poi_indices).to('cuda')
+
+        region_embeddings[region_id] = embeddings
+
+    summed_region_embeddings = {}
+
+    for region_id, embeddings in region_embeddings.items():
+        # Sum the embeddings along the new dimension
+        summed_embeddings = torch.sum(embeddings, dim=0)
+
+        # Store the summed embeddings in the dictionary
+        summed_region_embeddings[region_id] = summed_embeddings
+    sorted_embeddings = [summed_region_embeddings[k]
+                         for k in sorted(summed_region_embeddings)]
+
+    # Stack these tensors to create a single tensor
+    final_embeddings_tensor = torch.stack(sorted_embeddings)
+
+    input_size = 768
+    hidden_size = 500
+    model = MyModel(input_size, hidden_size).to('cuda')
+
+    output = model(final_embeddings_tensor)
+    # print(f"Mean: {output.mean()}, Std Dev: {output.std()},shape{output.shape}")
+    return output
+
+
+def generate_region_id(latitude, longitude, grid_size):
+    grid_size = float(grid_size)
+    grid_lat = int(latitude / grid_size)
+    grid_lon = int(longitude / grid_size)
+
+    region_id = f"R_{grid_lat}_{grid_lon}"
+
+    return region_id
+
+
+def split(city='NYC', threshold=20, regionRate=0.005, node_embeddings=None):
 
     df = pd.read_csv(f'../{city}/foursquare_mapped_NYC.geo')
     bvc = df['venue_category_name'].value_counts() >= threshold
@@ -197,9 +267,16 @@ def split(city='NYC', threshold=20):
     df = df[df['venue_category_name'].isin(bvc)]
     df.reset_index(inplace=True, drop=True)
 
+    id_all = []
+    for i in range(len(df['Long'])):
+        id_all.append(generate_region_id(
+            df['Lat'][i], df['Long'][i], grid_size=regionRate))
+    df['region_id_tune'] = id_all
+    # print(df.nunique())
+
     brand2id, cate12id, cate22id = {}, {}, {}
     for idx, row in df.iterrows():
-        brand, cate_1, cate_2 = row['venue_category_name'], row['topCate'], row['region_id']
+        brand, cate_1, cate_2 = row['venue_category_name'], row['topCate'], row['region_id_tune']
         if brand not in brand2id.keys():
             brand2id[brand] = len(brand2id)
         if cate_1 not in cate12id.keys():
@@ -212,17 +289,19 @@ def split(city='NYC', threshold=20):
     cate12id = pd.DataFrame(
         {'topCate': list(cate12id.keys()), 'Cate1_ID': list(cate12id.values())})
     cate22id = pd.DataFrame(
-        {'region_id': list(cate22id.keys()), 'Region_ID': list(cate22id.values())})
+        {'region_id_tune': list(cate22id.keys()), 'Region_ID': list(cate22id.values())})
 
     df = df.merge(brand2id, on=['venue_category_name'], how='left')
     df = df.merge(cate12id, on=['topCate'], how='left')
-    df = df.merge(cate22id, on=['region_id'], how='left')
+    df = df.merge(cate22id, on=['region_id_tune'], how='left')
+
+    final_embeddings_tensor = map_emb_to_region(node_embeddings, df)
 
     df = df[['geo_id', 'venue_category_name',
              'Brand_ID', 'Cate1_ID', 'Region_ID']]
 
-    print(df['Brand_ID'].max())
-    print(df['Region_ID'].max())
+    # print(df['Brand_ID'].max())
+    print('Region_ID max: ', df['Region_ID'].max())
 
     np.random.seed(42)
     train_data, test_data = [], []
@@ -238,14 +317,16 @@ def split(city='NYC', threshold=20):
 
     train_data, test_data = pd.concat(
         train_data, axis=0), pd.concat(test_data, axis=0)
-    print(train_data.shape, "train_data.shape")
-    print(test_data.shape, "test_data.shape")
+    # print(train_data.shape, "train_data.shape")
+    # print(test_data.shape, "test_data.shape")
     dir_path = os.path.join('../', city, 'split')
 
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
     train_data.to_pickle(os.path.join(dir_path, 'train.pkl'))
     test_data.to_pickle(os.path.join(dir_path, 'test.pkl'))
+
+    return final_embeddings_tensor
 
 
 class OpenSiteRec(Dataset):
@@ -339,9 +420,9 @@ class OpenSiteRec(Dataset):
         return torch.sparse.FloatTensor(index, data, torch.Size(coo.shape))
 
     def get_sparse_graph(self):
-        print("loading matrix")
+        # print("loading matrix")
         if self.Graph is None:
-            print("generating adjacency matrix")
+            # print("generating adjacency matrix")
             adj_mat = sp.dok_matrix(
                 (self.n_user + self.m_item, self.n_user + self.m_item), dtype=np.float64)
             adj_mat = adj_mat.tolil()
@@ -358,7 +439,7 @@ class OpenSiteRec(Dataset):
             norm_adj = d_mat.dot(adj_mat)
             norm_adj = norm_adj.dot(d_mat)
             norm_adj = norm_adj.tocsr()
-            print(f"saved norm_mat...")
+            # print(f"saved norm_mat...")
             dir_path = os.path.join('../' + self.city, 'split')
 
             if not os.path.exists(dir_path):
