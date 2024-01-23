@@ -179,7 +179,6 @@
 #         return len(self.S)
 
 
-
 import os
 import pandas as pd
 import numpy as np
@@ -192,13 +191,13 @@ from sklearn.model_selection import train_test_split
 
 def split(city='NYC', threshold=20):
 
-    df = pd.read_csv(city + '/foursquare_mapped_NYC.geo')
+    df = pd.read_csv(f'../{city}/foursquare_mapped_NYC.geo')
     bvc = df['venue_category_name'].value_counts() >= threshold
     bvc = bvc[bvc > 0].index
     df = df[df['venue_category_name'].isin(bvc)]
     df.reset_index(inplace=True, drop=True)
 
-    brand2id, cate12id, cate22id= {}, {}, {}
+    brand2id, cate12id, cate22id = {}, {}, {}
     for idx, row in df.iterrows():
         brand, cate_1, cate_2 = row['venue_category_name'], row['topCate'], row['region_id']
         if brand not in brand2id.keys():
@@ -208,16 +207,19 @@ def split(city='NYC', threshold=20):
         if cate_2 not in cate22id.keys():
             cate22id[cate_2] = len(cate22id)
 
-    brand2id = pd.DataFrame({'venue_category_name': list(brand2id.keys()), 'Brand_ID': list(brand2id.values())})
-    cate12id = pd.DataFrame({'topCate': list(cate12id.keys()), 'Cate1_ID': list(cate12id.values())})
-    cate22id = pd.DataFrame({'region_id': list(cate22id.keys()), 'Region_ID': list(cate22id.values())})
-
+    brand2id = pd.DataFrame({'venue_category_name': list(
+        brand2id.keys()), 'Brand_ID': list(brand2id.values())})
+    cate12id = pd.DataFrame(
+        {'topCate': list(cate12id.keys()), 'Cate1_ID': list(cate12id.values())})
+    cate22id = pd.DataFrame(
+        {'region_id': list(cate22id.keys()), 'Region_ID': list(cate22id.values())})
 
     df = df.merge(brand2id, on=['venue_category_name'], how='left')
     df = df.merge(cate12id, on=['topCate'], how='left')
     df = df.merge(cate22id, on=['region_id'], how='left')
 
-    df = df[['geo_id', 'venue_category_name', 'Brand_ID', 'Cate1_ID', 'Region_ID']]
+    df = df[['geo_id', 'venue_category_name',
+             'Brand_ID', 'Cate1_ID', 'Region_ID']]
 
     print(df['Brand_ID'].max())
     print(df['Region_ID'].max())
@@ -234,10 +236,11 @@ def split(city='NYC', threshold=20):
         train_data.append(x_train)
         test_data.append(x_test)
 
-    train_data, test_data = pd.concat(train_data, axis=0), pd.concat(test_data, axis=0)
-    print(train_data.shape,"train_data.shape")
-    print(test_data.shape,"test_data.shape")
-    dir_path = os.path.join(city, 'split')
+    train_data, test_data = pd.concat(
+        train_data, axis=0), pd.concat(test_data, axis=0)
+    print(train_data.shape, "train_data.shape")
+    print(test_data.shape, "test_data.shape")
+    dir_path = os.path.join('../', city, 'split')
 
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
@@ -250,11 +253,16 @@ class OpenSiteRec(Dataset):
         super(OpenSiteRec, self).__init__()
         self.device = args.device
         self.city = args.city
-        self.train_data = pd.read_pickle(args.city + '/split/' + 'train.pkl')
-        self.test_data = pd.read_pickle(args.city + '/split/' + 'test.pkl')
-        self.n_user = int(max(self.train_data['Brand_ID'].max(), self.test_data['Brand_ID'].max()) + 1)
-        self.m_item = int(max(self.train_data['Region_ID'].max(), self.test_data['Region_ID'].max()) + 1)
-        self.k_cate = [int(max(self.train_data['Cate1_ID'].max(), self.test_data['Cate1_ID'].max()) + 1)]
+        self.train_data = pd.read_pickle(
+            '../'+args.city + '/split/' + 'train.pkl')
+        self.test_data = pd.read_pickle(
+            '../'+args.city + '/split/' + 'test.pkl')
+        self.n_user = int(
+            max(self.train_data['Brand_ID'].max(), self.test_data['Brand_ID'].max()) + 1)
+        self.m_item = int(
+            max(self.train_data['Region_ID'].max(), self.test_data['Region_ID'].max()) + 1)
+        self.k_cate = [int(max(self.train_data['Cate1_ID'].max(),
+                           self.test_data['Cate1_ID'].max()) + 1)]
         self.trainDataSize, self.testDataSize = self.train_data.shape[0], self.test_data.shape[0]
         self.UserItemNet = csr_matrix((np.ones(self.trainDataSize),
                                        (self.train_data['Brand_ID'], self.train_data['Region_ID'])),
@@ -263,7 +271,8 @@ class OpenSiteRec(Dataset):
         self.U, self.F, self.I = np.array(list(range(self.n_user))), [], []
         for user in range(self.n_user):
             features = self.train_data[self.train_data['Brand_ID'] == user]
-            self.F.append([features['Cate1_ID'].value_counts().index.tolist()[0]])
+            self.F.append(
+                [features['Cate1_ID'].value_counts().index.tolist()[0]])
             user_pos = self.allPos[user]
             user_label = torch.zeros(self.m_item, dtype=torch.float)
             user_label[user_pos] = 1.
@@ -333,7 +342,8 @@ class OpenSiteRec(Dataset):
         print("loading matrix")
         if self.Graph is None:
             print("generating adjacency matrix")
-            adj_mat = sp.dok_matrix((self.n_user + self.m_item, self.n_user + self.m_item), dtype=np.float64)
+            adj_mat = sp.dok_matrix(
+                (self.n_user + self.m_item, self.n_user + self.m_item), dtype=np.float64)
             adj_mat = adj_mat.tolil()
             R = self.UserItemNet.tolil()
             adj_mat[:self.n_user, self.n_user:] = R
@@ -355,7 +365,8 @@ class OpenSiteRec(Dataset):
                 os.makedirs(dir_path)
             sp.save_npz(os.path.join(dir_path, 's_pre_adj_mat.npz'), norm_adj)
 
-            self.Graph = self.__convert_sp_mat_to_sp_tensor(norm_adj).coalesce().to(self.device)
+            self.Graph = self.__convert_sp_mat_to_sp_tensor(
+                norm_adj).coalesce().to(self.device)
 
         return self.Graph
 
@@ -364,4 +375,3 @@ class OpenSiteRec(Dataset):
 
     def __len__(self):
         return len(self.S)
-
