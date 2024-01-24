@@ -25,7 +25,7 @@ def parse_args():
         'seed': 42,
         'model': 'VanillaMF',
         'dim': 100,
-        'city': 'foursquare_nyc',
+        'city': 'yelp_la',
         'threshold': 5,
         'topk': [15],
         'patience': 5,
@@ -33,7 +33,7 @@ def parse_args():
         'lr_reduce_freq': 10,
         'batch_size': 128,
         'save': 0,
-        'region_rate': 0.005
+        'region_rate': 0.008
     }
 
     parser = argparse.ArgumentParser()
@@ -49,9 +49,9 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed_all(args.seed)
 args.device = 'cuda:' + str(args.cuda) if int(args.cuda) >= 0 else 'cpu'
 
-emb_path = f'../{args.city}/{args.city}_emb_drop_norm.pth'
+emb_path = f'../{args.city}/{args.city}_emb_decode_10.pth'
 origin_emb = torch.load(emb_path).to(args.device)
-
+print(origin_emb.shape)
 new_embeddings = split(args.city, args.threshold, args.region_rate, origin_emb)
 # print(f"Mean: {new_embeddings.mean()}, Std Dev: {new_embeddings.std()},shape{new_embeddings.shape}")
 dataset = OpenSiteRec(args)

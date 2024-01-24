@@ -240,7 +240,7 @@ def map_emb_to_region(node_embedding, df):
     # Stack these tensors to create a single tensor
     final_embeddings_tensor = torch.stack(sorted_embeddings)
 
-    input_size = 768
+    input_size = final_embeddings_tensor.size(1)
     hidden_size = 500
     model = MyModel(input_size, hidden_size).to('cuda')
 
@@ -260,11 +260,26 @@ def generate_region_id(latitude, longitude, grid_size):
 
 
 def split(city='NYC', threshold=20, regionRate=0.005, node_embeddings=None):
+    if city == 'foursquare_nyc':
+        df = pd.read_csv(f'../{city}/foursquare_mapped_NYC.geo')
+        brandName = 'venue_category_name'
+    if city == 'yelp_la':
+        brandName = 'categories'
+        df = pd.read_csv(f'../{city}/{city}.geo')
+        coordinates = df['coordinates'].str.strip('[]').str.split(',', expand=True)
+        coordinates.columns = ['Long', 'Lat']
 
-    df = pd.read_csv(f'../{city}/foursquare_mapped_NYC.geo')
-    bvc = df['venue_category_name'].value_counts() >= threshold
+        # Convert the new longitude and latitude columns to numeric type
+        coordinates['Long'] = pd.to_numeric(coordinates['Long'], errors='coerce')
+        coordinates['Lat'] = pd.to_numeric(coordinates['Lat'], errors='coerce')
+
+        # Assign these new columns to your dataframe
+        df = df.join(coordinates)
+        df = df.rename(columns={"main categories": "topCate", "B": "c"})
+
+    bvc = df[brandName].value_counts() >= threshold
     bvc = bvc[bvc > 0].index
-    df = df[df['venue_category_name'].isin(bvc)]
+    df = df[df[brandName].isin(bvc)]
     df.reset_index(inplace=True, drop=True)
 
     id_all = []
@@ -276,7 +291,7 @@ def split(city='NYC', threshold=20, regionRate=0.005, node_embeddings=None):
 
     brand2id, cate12id, cate22id = {}, {}, {}
     for idx, row in df.iterrows():
-        brand, cate_1, cate_2 = row['venue_category_name'], row['topCate'], row['region_id_tune']
+        brand, cate_1, cate_2 = row[brandName], row['topCate'], row['region_id_tune']
         if brand not in brand2id.keys():
             brand2id[brand] = len(brand2id)
         if cate_1 not in cate12id.keys():
@@ -284,20 +299,20 @@ def split(city='NYC', threshold=20, regionRate=0.005, node_embeddings=None):
         if cate_2 not in cate22id.keys():
             cate22id[cate_2] = len(cate22id)
 
-    brand2id = pd.DataFrame({'venue_category_name': list(
+    brand2id = pd.DataFrame({brandName: list(
         brand2id.keys()), 'Brand_ID': list(brand2id.values())})
     cate12id = pd.DataFrame(
         {'topCate': list(cate12id.keys()), 'Cate1_ID': list(cate12id.values())})
     cate22id = pd.DataFrame(
         {'region_id_tune': list(cate22id.keys()), 'Region_ID': list(cate22id.values())})
 
-    df = df.merge(brand2id, on=['venue_category_name'], how='left')
+    df = df.merge(brand2id, on=[brandName], how='left')
     df = df.merge(cate12id, on=['topCate'], how='left')
     df = df.merge(cate22id, on=['region_id_tune'], how='left')
 
     final_embeddings_tensor = map_emb_to_region(node_embeddings, df)
 
-    df = df[['geo_id', 'venue_category_name',
+    df = df[['geo_id', brandName,
              'Brand_ID', 'Cate1_ID', 'Region_ID']]
 
     # print(df['Brand_ID'].max())
